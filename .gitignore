@@ -1,0 +1,14 @@
+# API Keys and local secrets
+config.json
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environment variables
+.env
+
+# OS specific files
+.DS_Store
+Thumbs.db
