@@ -32,13 +32,19 @@
       console.log("AI Addon [JS]: Highlighted text ->", extractedText.trim());
 
       window.ankiAITargetRange = sel.getRangeAt(0).cloneRange();
-      window.ankiAIWhitespacePrefix = ""; // No prefix needed for manual highlights
+
+      // --- FIX: CAPTURE LEADING AND TRAILING INDENTATION IN SELECTION ---
+      const leadingMatch = extractedText.match(/^[\s\u00A0]+/);
+      window.ankiAIWhitespacePrefix = leadingMatch ? leadingMatch[0] : "";
+
+      const trailingMatch = extractedText.match(/[\s\u00A0]+$/);
+      window.ankiAIWhitespaceSuffix = trailingMatch ? trailingMatch[0] : "";
 
       return extractedText.trim();
     }
 
     // SCENARIO B: No text highlighted, grab the current line
-    console.log("AI Addon [JS]: No text highlighted. Grabbing current line...");
+    console.log("AI Addon[JS]: No text highlighted. Grabbing current line...");
     let anchor = sel.anchorNode;
     if (!anchor) return "";
 
@@ -57,11 +63,15 @@
 
     extractedText = blockElement.innerText || blockElement.textContent || "";
 
-    // --- NEW: CAPTURE LEADING INDENTATION ---
-    // \s captures regular spaces and tabs, \u00A0 captures &nbsp;
+    // --- FIX: CAPTURE LEADING AND TRAILING INDENTATION FOR WHOLE LINE ---
     const leadingWhitespaceMatch = extractedText.match(/^[\s\u00A0]+/);
     window.ankiAIWhitespacePrefix = leadingWhitespaceMatch
       ? leadingWhitespaceMatch[0]
+      : "";
+
+    const trailingWhitespaceMatch = extractedText.match(/[\s\u00A0]+$/);
+    window.ankiAIWhitespaceSuffix = trailingWhitespaceMatch
+      ? trailingWhitespaceMatch[0]
       : "";
 
     // Now trim the text so the AI gets a clean prompt
@@ -79,9 +89,10 @@
   };
 
   window.ankiAI_injectCloze = function (original, translated) {
-    // Construct the cloze, PREPENDING the saved indentation
+    // Construct the cloze, PREPENDING and APPENDING the saved whitespace
     const prefix = window.ankiAIWhitespacePrefix || "";
-    const cloze = `${prefix}{{c1::${original}::${translated}}}`;
+    const suffix = window.ankiAIWhitespaceSuffix || "";
+    const cloze = `${prefix}{{c1::${original}::${translated}}}${suffix}`;
 
     const sel = window.getSelection();
     if (window.ankiAITargetRange) {
@@ -89,8 +100,7 @@
       sel.addRange(window.ankiAITargetRange);
     }
 
-    // --- NEW: OBLITERATE INLINE FORMATTING ---
-    // This forcibly removes <i>, <b>, <u>, and font styling from the selection!
+    // --- OBLITERATE INLINE FORMATTING ---
     document.execCommand("removeFormat", false, null);
 
     // Overwrite the selected line with our new, unformatted text
@@ -99,6 +109,7 @@
     // Clean up
     window.ankiAITargetRange = null;
     window.ankiAIWhitespacePrefix = "";
+    window.ankiAIWhitespaceSuffix = "";
 
     return true;
   };
