@@ -30,7 +30,7 @@ def on_translate_hotkey(editor: Editor):
         log_debug("1. RAW TEXT FROM JS", f"'{selected_text}'")
 
         if not selected_text:
-            tooltip("No text highlighted! Please highlight the text to translate.")
+            tooltip("No text found. Please place your cursor on a line with text or highlight it.")
             return
 
         tooltip("Gemini is thinking...")
