@@ -44,7 +44,7 @@ def translate_via_gemini(text):
         data = json.dumps(payload).encode('utf-8')
         req = urllib.request.Request(url, data=data, headers={'Content-Type': 'application/json'})
         
-        with urllib.request.urlopen(req, context=get_ssl_context(), timeout=15) as response:
+        with urllib.request.urlopen(req, context=get_ssl_context(), timeout=30) as response:
             res_data = json.loads(response.read().decode('utf-8'))
             return res_data['candidates'][0]['content']['parts'][0]['text'].strip()
                 

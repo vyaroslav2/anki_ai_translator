@@ -1,18 +1,15 @@
-def get_selected_text_or_line():
-    # We added console.log so you can see it in the Inspector (F12)
-    return """
-    (function() {
-        var selection = window.getSelection();
-        var text = "";
-        
-        if (selection.toString().length > 0) {
-            text = selection.toString();
-            console.log("AI Addon: Found selection: " + text);
-        } else {
-            // Fallback: Get the text of the current element/line
-            text = selection.anchorNode ? selection.anchorNode.textContent : "";
-            console.log("AI Addon: No selection, grabbing line: " + text);
-        }
-        return text;
-    })()
-    """
+import os
+from aqt import mw
+
+def get_js_logic():
+    """Reads logic.js from the addon folder to allow hot-reloading."""
+    # Get the path to the addon folder
+    addon_path = os.path.dirname(__file__)
+    js_path = os.path.join(addon_path, "logic.js")
+    
+    try:
+        with open(js_path, "r", encoding="utf-8") as f:
+            return f.read()
+    except Exception as e:
+        print(f"Error reading logic.js: {e}")
+        return ""

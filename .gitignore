@@ -12,3 +12,5 @@ __pycache__/
 # OS specific files
 .DS_Store
 Thumbs.db
+
+debug.log
