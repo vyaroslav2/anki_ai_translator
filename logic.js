@@ -1,4 +1,5 @@
 // logic.js
+
 (function () {
   // Helper to pierce Anki's Shadow DOM
   function getActiveElement() {
@@ -15,6 +16,8 @@
 
   window.ankiAI_getText = function () {
     const activeEl = getActiveElement();
+    window.ankiAI_activeElement = activeEl;
+
     const rootNode = activeEl ? activeEl.getRootNode() : document;
     const sel = rootNode.getSelection
       ? rootNode.getSelection()
@@ -27,90 +30,106 @@
 
     let extractedText = sel.toString();
 
-    // SCENARIO A: Text is manually highlighted
-    if (extractedText.trim().length > 0) {
-      console.log("AI Addon [JS]: Highlighted text ->", extractedText.trim());
+    // SCENARIO: No text highlighted. Let's select the block/line containing the cursor.
+    if (extractedText.trim().length === 0) {
+      let anchor = sel.anchorNode;
+      if (!anchor) return "";
 
-      window.ankiAITargetRange = sel.getRangeAt(0).cloneRange();
+      let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
+      while (
+        blockElement &&
+        blockElement !== activeEl &&
+        !["DIV", "P", "LI", "ANKI-EDITABLE"].includes(
+          blockElement.nodeName.toUpperCase(),
+        )
+      ) {
+        blockElement = blockElement.parentNode;
+      }
 
-      // --- FIX: CAPTURE LEADING AND TRAILING INDENTATION IN SELECTION ---
-      const leadingMatch = extractedText.match(/^[\s\u00A0]+/);
-      window.ankiAIWhitespacePrefix = leadingMatch ? leadingMatch[0] : "";
-
-      const trailingMatch = extractedText.match(/[\s\u00A0]+$/);
-      window.ankiAIWhitespaceSuffix = trailingMatch ? trailingMatch[0] : "";
-
-      return extractedText.trim();
-    }
-
-    // SCENARIO B: No text highlighted, grab the current line
-    console.log("AI Addon[JS]: No text highlighted. Grabbing current line...");
-    let anchor = sel.anchorNode;
-    if (!anchor) return "";
-
-    let blockElement = anchor.nodeType === 3 ? anchor.parentNode : anchor;
-    while (
-      blockElement &&
-      blockElement !== activeEl &&
-      !["DIV", "P", "LI"].includes(blockElement.nodeName)
-    ) {
-      blockElement = blockElement.parentNode;
-    }
-
-    if (!blockElement || blockElement === activeEl) {
-      blockElement = activeEl;
-    }
-
-    extractedText = blockElement.innerText || blockElement.textContent || "";
-
-    // --- FIX: CAPTURE LEADING AND TRAILING INDENTATION FOR WHOLE LINE ---
-    const leadingWhitespaceMatch = extractedText.match(/^[\s\u00A0]+/);
-    window.ankiAIWhitespacePrefix = leadingWhitespaceMatch
-      ? leadingWhitespaceMatch[0]
-      : "";
-
-    const trailingWhitespaceMatch = extractedText.match(/[\s\u00A0]+$/);
-    window.ankiAIWhitespaceSuffix = trailingWhitespaceMatch
-      ? trailingWhitespaceMatch[0]
-      : "";
-
-    // Now trim the text so the AI gets a clean prompt
-    extractedText = extractedText.trim();
-
-    if (extractedText.length > 0) {
-      console.log("AI Addon [JS]: Extracted line ->", extractedText);
+      if (!blockElement) blockElement = activeEl;
 
       const range = document.createRange();
       range.selectNodeContents(blockElement);
-      window.ankiAITargetRange = range;
+      sel.removeAllRanges();
+      sel.addRange(range);
+
+      extractedText = sel.toString();
     }
 
-    return extractedText;
+    if (extractedText.trim().length === 0) {
+      console.warn("AI Addon: Line is empty.");
+      return "";
+    }
+
+    // Capture indentation
+    const leadingMatch = extractedText.match(/^[\s\u00A0]+/);
+    const prefix = leadingMatch ? leadingMatch[0] : "";
+
+    const trailingMatch = extractedText.match(/[\s\u00A0]+$/);
+    const suffix = trailingMatch ? trailingMatch[0] : "";
+
+    const cleanText = extractedText.trim();
+
+    // Generate a unique token for the placeholder
+    window.ankiAI_token = "[[AI_TRANSLATING_" + Date.now() + "]]";
+    const skeleton = `${prefix}{{c1::${cleanText}::${window.ankiAI_token}}}${suffix}`;
+
+    // IMMEDIATELY inject the skeleton while the window still has perfect focus
+    document.execCommand("removeFormat", false, null);
+    document.execCommand("insertText", false, skeleton);
+
+    console.log("AI Addon: Placeholder injected immediately.");
+    return cleanText;
   };
 
   window.ankiAI_injectCloze = function (original, translated) {
-    // Construct the cloze, PREPENDING and APPENDING the saved whitespace
-    const prefix = window.ankiAIWhitespacePrefix || "";
-    const suffix = window.ankiAIWhitespaceSuffix || "";
-    const cloze = `${prefix}{{c1::${original}::${translated}}}${suffix}`;
+    const activeEl = window.ankiAI_activeElement;
+    const token = window.ankiAI_token;
 
-    const sel = window.getSelection();
-    if (window.ankiAITargetRange) {
-      sel.removeAllRanges();
-      sel.addRange(window.ankiAITargetRange);
+    if (!activeEl || !token) {
+      console.warn("AI Addon [JS]: Missing active element or token.");
+      return false;
     }
 
-    // --- OBLITERATE INLINE FORMATTING ---
-    document.execCommand("removeFormat", false, null);
+    // Surgical TextNode Replacement: We crawl the DOM looking for our token.
+    // This doesn't use cursors or selections, so it works flawlessly even if the window is blurred.
+    const root = activeEl.shadowRoot || activeEl;
+    const walker = document.createTreeWalker(
+      root,
+      NodeFilter.SHOW_TEXT,
+      null,
+      false,
+    );
 
-    // Overwrite the selected line with our new, unformatted text
-    document.execCommand("insertText", false, cloze);
+    let found = false;
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.nodeValue.includes(token)) {
+        // We found the exact node! Swap the token for the translation.
+        node.nodeValue = node.nodeValue.replace(token, translated);
+        found = true;
+        break;
+      }
+    }
 
-    // Clean up
-    window.ankiAITargetRange = null;
-    window.ankiAIWhitespacePrefix = "";
-    window.ankiAIWhitespaceSuffix = "";
+    // Failsafe: Just in case the TreeWalker missed it, do a raw HTML swap
+    if (!found) {
+      console.log(
+        "AI Addon: TreeWalker missed token, using innerHTML fallback.",
+      );
+      root.innerHTML = root.innerHTML.replace(token, translated);
+    }
 
+    // Force Anki's ProseMirror engine to register the change and save the card
+    activeEl.dispatchEvent(
+      new Event("input", { bubbles: true, composed: true }),
+    );
+
+    // Clean up memory
+    window.ankiAI_activeElement = null;
+    window.ankiAI_token = null;
+
+    console.log("AI Addon: Translation injected successfully.");
     return true;
   };
 
